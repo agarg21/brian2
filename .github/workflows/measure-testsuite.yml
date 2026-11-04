@@ -1,0 +1,113 @@
+name: TestSuite
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  get_python_versions:
+    name: "Determine Python versions"
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      min-python: ${{ steps.nep29.outputs.min-python }}
+      max-python: ${{ steps.nep29.outputs.max-python }}
+    steps:
+      - name: "calculate versions according to SPEC-0"
+        id: nep29
+        uses: mstimberg/github-calc-nep29@1f825dcb1a90ced306e498cbd8584ef61af41423 # v0.8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Match SPEC-0
+          deprecate-python-after: 36
+          min-python-releases: 0
+
+  testing:
+    needs: [get_python_versions]
+    name: "Python ${{ matrix.python-version }} on ${{ matrix.os.image }} (standalone: ${{ matrix.standalone }}, 32bit: ${{ matrix.float_dtype_32 }})"
+    runs-on: ${{ matrix.os.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          [
+            { image: ubuntu-24.04, triplet: x64-linux },
+            { image: windows-2022, triplet: x64-windows },
+          ]
+        standalone: [false]
+        float_dtype_32: [false]
+        python-version: ["${{ needs.get_python_versions.outputs.max-python }}"]
+
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch tags from main respository
+        run: |
+          git remote add upstream https://github.com/brian-team/brian2 && \
+          git fetch --tags --force upstream
+      - name: Install GSL
+        uses: johnwason/vcpkg-action@04c68c847bf5196ecaa72331ecf51208583916ef # v8.0.0
+        id: vcpkg
+        with:
+          pkgs: gsl
+          triplet: ${{ matrix.os.triplet }}
+          cache-key: gsl-${{ matrix.os.triplet }}
+          revision: master
+          token: ${{ github.token }}
+      - name: Set GSL preference for vcpkg
+        shell: bash
+        run: |
+          mkdir ~/.brian/
+          # Replaces backslashes with forward slashes
+          echo "GSL.directory=\"${{ github.workspace }}\\vcpkg\\installed\${{ matrix.os.triplet }}\\include"\" | tr '\\' '/' > ~/.brian/user_preferences
+          cat ~/.brian/user_preferences
+      - name: Install Python
+        id: python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          cache: "pip"
+          python-version: ${{ matrix.python-version }}
+      - name: Install Brian2 and dependencies
+        env:
+          PYTHON_BINARY: ${{ steps.python.outputs.python-path }}
+        run: |
+          "$PYTHON_BINARY" -m pip install .[test]
+
+      - name: Determine Cython cache dir
+        id: cython-cache
+        run: |
+          cd  $GITHUB_WORKSPACE/.. # move out of the workspace to avoid direct import
+          CACHE_DIR=$("$PYTHON_BINARY" -c 'from brian2.codegen.runtime.cython_rt.extension_manager import get_cython_cache_dir; print(get_cython_cache_dir())')
+          echo "Cython cache dir: $CACHE_DIR"
+          echo "cachedir=$CACHE_DIR" >> "$GITHUB_OUTPUT"
+        env:
+          PYTHON_BINARY: ${{ steps.python.outputs.python-path }}
+
+      - name: restore Cython cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ ! matrix.standalone }}
+        with:
+          key: cython-extensions-${{ matrix.os.image }}-${{ runner.arch }}-${{ matrix.python-version }}-32bit-${{ matrix.float_dtype_32 }}
+          path: ${{ steps.cython-cache.outputs.cachedir }}
+
+      - name: Run Tests
+        run: |
+          cd  $GITHUB_WORKSPACE/.. && \
+          "$PYTHON_BINARY" $GITHUB_WORKSPACE/$SCRIPT_NAME && \
+          cp coverage.xml $GITHUB_WORKSPACE/
+        env:
+          SCRIPT_NAME: dev/continuous-integration/run_test_suite.py
+          SPHINX_DIR: ${{ github.workspace }}/docs_sphinx
+          AGENT_OS: ${{runner.os}}
+          STANDALONE: ${{ matrix.standalone }}
+          FLOAT_DTYPE_32: ${{ matrix.float_dtype_32 }}
+          PYTHON_BINARY: ${{ steps.python.outputs.python-path }}
+          DO_NOT_RESET_PREFERENCES: true # Make sure that GSL setting is used
