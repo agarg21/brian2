@@ -16,7 +16,7 @@ jobs:
         with:
           key: cython-extensions-ubuntu-24.04-${{ runner.arch }}-3.15-32bit-false-${{ hashFiles('brian2/codegen/**') }}
           restore-keys: cython-extensions-ubuntu-24.04-${{ runner.arch }}-3.15-32bit-false-
-          path: ~/.cython/brian_extensions
+          path: /home/runner/.cython/brian_extensions
       - name: scan
         run: |
           echo "HITKEY=${{ steps.c.outputs.cache-matched-key }}"
