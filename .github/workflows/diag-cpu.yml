@@ -1,7 +1,7 @@
 name: diag-cpu
 on:
-  push:
-    branches: ['diag/**']
+  pull_request:
+    branches: ['measure/fix']
 jobs:
   diag:
     strategy:
@@ -23,10 +23,8 @@ jobs:
           lscpu | grep -E 'Model name|^CPU\(s\)'
           echo "avx512f=$(grep -c avx512f /proc/cpuinfo) avx2=$(grep -c avx2 /proc/cpuinfo)"
           cd ~/.cython/brian_extensions || exit 0
-          n=0; z=0; y=0
-          for f in *.so; do n=$((n+1)); [ $n -le 400 ] || break
-            o=$(objdump -d --no-show-raw-insn "$f" | grep -cE 'zmm'); p=$(objdump -d --no-show-raw-insn "$f" | grep -cE 'ymm')
-            [ "$o" -gt 0 ] && z=$((z+1)); [ "$p" -gt 0 ] && y=$((y+1))
-          done
-          echo "SO_total=$(ls *.so | wc -l) scanned=$((n)) with_zmm=$z with_ymm=$y"
-          ls -l --time-style=full-iso *.so | awk '{print $6}' | sort | uniq -c
+          ls *.so | wc -l
+          scan() { objdump -d --no-show-raw-insn "$1" | grep -cE '%zmm|%k[1-7]|%[xy]mm(1[6-9]|2[0-9]|3[01])'; }
+          n=0; z=0; for f in *.so; do n=$((n+1)); [ "$(scan "$f")" -gt 0 ] && z=$((z+1)); done
+          echo "SO_total=$n with_avx512_regs=$z"
+          ls *a0b7dadcb63172789227ce96375a51d4*.so 2>/dev/null | while read f; do echo "CRASHED_MODULE $f avx512_lines=$(scan "$f")"; done
