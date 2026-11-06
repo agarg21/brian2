@@ -1,0 +1,30 @@
+name: diag-cpu
+on:
+  pull_request:
+    branches: ['measure/fix2']
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [1,2,3,4,5,6]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        id: c
+        with:
+          key: cython-extensions-ubuntu-24.04-${{ runner.arch }}-3.15-32bit-false-${{ hashFiles('brian2/codegen/**') }}
+          restore-keys: cython-extensions-ubuntu-24.04-${{ runner.arch }}-3.15-32bit-false-
+          path: /home/runner/.cython/brian_extensions
+      - name: scan
+        run: |
+          echo "HITKEY=${{ steps.c.outputs.cache-matched-key }}"
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "avx512f=$(grep -c avx512f /proc/cpuinfo) avx2=$(grep -c avx2 /proc/cpuinfo)"
+          cd ~/.cython/brian_extensions || exit 0
+          ls *.so | wc -l
+          scan() { objdump -d --no-show-raw-insn "$1" | grep -cE '%zmm|%k[1-7]|%[xy]mm(1[6-9]|2[0-9]|3[01])'; }
+          n=0; z=0; for f in *.so; do n=$((n+1)); [ "$(scan "$f")" -gt 0 ] && z=$((z+1)); done
+          echo "SO_total=$n with_avx512_regs=$z"
+          ls *a0b7dadcb63172789227ce96375a51d4*.so 2>/dev/null | while read f; do echo "CRASHED_MODULE $f avx512_lines=$(scan "$f")"; done
