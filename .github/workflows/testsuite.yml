@@ -121,6 +121,10 @@ jobs:
           mkdir ~/.brian/
           # Replaces backslashes with forward slashes
           echo "GSL.directory=\"${{ github.workspace }}\\vcpkg\\installed\${{ matrix.os.triplet }}\\include"\" | tr '\\' '/' > ~/.brian/user_preferences
+          if [ "$RUNNER_OS" = "Linux" ] && [ "${{ matrix.standalone }}" = "false" ]; then
+            # Extensions are cached across runners with different CPUs: -march=native binaries can SIGILL
+            echo "codegen.cpp.extra_compile_args_gcc=['-w','-O3','-ffast-math','-fno-finite-math-only','-march=x86-64-v3','-std=c++17']" >> ~/.brian/user_preferences
+          fi
           cat ~/.brian/user_preferences
       - name: Install Python
         id: python
@@ -148,7 +152,8 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ ! matrix.standalone }}
         with:
-          key: cython-extensions-${{ matrix.os.image }}-${{ runner.arch }}-${{ matrix.python-version }}-32bit-${{ matrix.float_dtype_32 }}
+          key: cython-extensions-${{ matrix.os.image }}-${{ runner.arch }}-${{ matrix.python-version }}-32bit-${{ matrix.float_dtype_32 }}-${{ hashFiles('brian2/codegen/**') }}
+          restore-keys: cython-extensions-${{ matrix.os.image }}-${{ runner.arch }}-${{ matrix.python-version }}-32bit-${{ matrix.float_dtype_32 }}-
           path: ${{ steps.cython-cache.outputs.cachedir }}
 
       - name: Run Tests
