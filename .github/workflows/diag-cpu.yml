@@ -1,0 +1,32 @@
+name: diag-cpu
+on:
+  push:
+    branches: ['diag/**']
+jobs:
+  diag:
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [1,2,3,4,5,6]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        id: c
+        with:
+          key: cython-extensions-ubuntu-24.04-${{ runner.arch }}-3.15-32bit-false-${{ hashFiles('brian2/codegen/**') }}
+          restore-keys: cython-extensions-ubuntu-24.04-${{ runner.arch }}-3.15-32bit-false-
+          path: ~/.cython/brian_extensions
+      - name: scan
+        run: |
+          echo "HITKEY=${{ steps.c.outputs.cache-matched-key }}"
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "avx512f=$(grep -c avx512f /proc/cpuinfo) avx2=$(grep -c avx2 /proc/cpuinfo)"
+          cd ~/.cython/brian_extensions || exit 0
+          n=0; z=0; y=0
+          for f in *.so; do n=$((n+1)); [ $n -le 400 ] || break
+            o=$(objdump -d --no-show-raw-insn "$f" | grep -cE 'zmm'); p=$(objdump -d --no-show-raw-insn "$f" | grep -cE 'ymm')
+            [ "$o" -gt 0 ] && z=$((z+1)); [ "$p" -gt 0 ] && y=$((y+1))
+          done
+          echo "SO_total=$(ls *.so | wc -l) scanned=$((n)) with_zmm=$z with_ymm=$y"
+          ls -l --time-style=full-iso *.so | awk '{print $6}' | sort | uniq -c
